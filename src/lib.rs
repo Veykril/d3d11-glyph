@@ -5,7 +5,6 @@ pub use glyph_brush::{
     LineBreak, LineBreaker, Section, SectionGeometry, SectionGlyph, SectionGlyphIter, SectionText,
     Text, VerticalAlign,
 };
-use util::HResult;
 
 use std::borrow::Cow;
 use std::hash::BuildHasher;
@@ -13,8 +12,10 @@ use std::hash::BuildHasher;
 use ab_glyph::{Font, Rect};
 use glyph_brush::{BrushAction, BrushError, DefaultSectionHasher};
 use pipeline::{Pipeline, Vertex};
+use util::HResult;
 use winapi::um::d3d11::{
-    ID3D11Device, D3D11_FILTER, D3D11_RECT, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION,
+    ID3D11DepthStencilView, ID3D11Device, ID3D11RenderTargetView, D3D11_DEPTH_STENCIL_DESC,
+    D3D11_FILTER, D3D11_RECT, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION,
 };
 use wio::com::ComPtr;
 
@@ -128,6 +129,32 @@ where
     }
 }
 
+impl<F, H> GlyphBrush<D3D11_DEPTH_STENCIL_DESC, F, H>
+where
+    F: Font,
+    H: BuildHasher,
+{
+    fn new(
+        device: ComPtr<ID3D11Device>,
+        filter_mode: D3D11_FILTER,
+        depth_stencil_desc: D3D11_DEPTH_STENCIL_DESC,
+        raw_builder: glyph_brush::GlyphBrushBuilder<F, H>,
+    ) -> HResult<Self> {
+        let glyph_brush = raw_builder.build();
+        let (cache_width, cache_height) = glyph_brush.texture_dimensions();
+        Ok(GlyphBrush {
+            pipeline: Pipeline::<D3D11_DEPTH_STENCIL_DESC>::new(
+                device,
+                filter_mode,
+                depth_stencil_desc,
+                cache_width,
+                cache_height,
+            )?,
+            glyph_brush,
+        })
+    }
+}
+
 impl<D, F, H> GlyphBrush<D, F, H>
 where
     F: Font + Sync,
@@ -186,24 +213,79 @@ where
 
 impl<F: Font + Sync, H: BuildHasher> GlyphBrush<(), F, H> {
     #[inline]
-    pub fn draw_queued(&mut self, target_width: u32, target_height: u32) -> HResult<()> {
-        self.draw_queued_with_transform(orthographic_projection(target_width, target_height))
+    pub fn draw_queued(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        target_width: u32,
+        target_height: u32,
+    ) -> HResult<()> {
+        self.draw_queued_with_transform(
+            target,
+            orthographic_projection(target_width, target_height),
+        )
     }
 
     #[inline]
-    pub fn draw_queued_with_transform(&mut self, transform: [f32; 16]) -> HResult<()> {
+    pub fn draw_queued_with_transform(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        transform: [f32; 16],
+    ) -> HResult<()> {
         self.process_queued()?;
-        self.pipeline.draw(transform, None)
+        self.pipeline.draw(target, transform, None)
     }
 
     #[inline]
     pub fn draw_queued_with_transform_and_scissoring(
         &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
         transform: [f32; 16],
         rect: D3D11_RECT,
     ) -> HResult<()> {
         self.process_queued()?;
-        self.pipeline.draw(transform, Some(rect))
+        self.pipeline.draw(target, transform, Some(rect))
+    }
+}
+
+impl<F: Font + Sync, H: BuildHasher> GlyphBrush<D3D11_DEPTH_STENCIL_DESC, F, H> {
+    #[inline]
+    pub fn draw_queued(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        depth_stencil_view: &ComPtr<ID3D11DepthStencilView>,
+        target_width: u32,
+        target_height: u32,
+    ) -> HResult<()> {
+        self.draw_queued_with_transform(
+            target,
+            depth_stencil_view,
+            orthographic_projection(target_width, target_height),
+        )
+    }
+
+    #[inline]
+    pub fn draw_queued_with_transform(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        depth_stencil_view: &ComPtr<ID3D11DepthStencilView>,
+        transform: [f32; 16],
+    ) -> HResult<()> {
+        self.process_queued()?;
+        self.pipeline
+            .draw(target, depth_stencil_view, transform, None)
+    }
+
+    #[inline]
+    pub fn draw_queued_with_transform_and_scissoring(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        depth_stencil_view: &ComPtr<ID3D11DepthStencilView>,
+        transform: [f32; 16],
+        rect: D3D11_RECT,
+    ) -> HResult<()> {
+        self.process_queued()?;
+        self.pipeline
+            .draw(target, depth_stencil_view, transform, Some(rect))
     }
 }
 
@@ -214,7 +296,7 @@ pub fn orthographic_projection(width: u32, height: u32) -> [f32; 16] {
     [
          2.0 / width, 0.0,           0.0, 0.0,
          0.0,         -2.0 / height, 0.0, 0.0,
-         0.0,         0.0,           0.0, 0.0,
+         0.0,         0.0,           1.0, 0.0,
         -1.0,         1.0,           0.0, 1.0,
     ]
 }
