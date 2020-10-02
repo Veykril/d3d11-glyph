@@ -178,7 +178,7 @@ unsafe fn build<D>(
         DepthBiasClamp: 0.0,
         SlopeScaledDepthBias: 0.0,
         DepthClipEnable: FALSE,
-        ScissorEnable: FALSE,
+        ScissorEnable: TRUE,
         MultisampleEnable: 0,
         AntialiasedLineEnable: 0,
     };
@@ -380,9 +380,15 @@ unsafe fn draw<D>(
 
     ctx.PSSetShaderResources(0, 1, &pipeline.cache.view());
 
-    if let Some(ref rect) = rect {
-        ctx.RSSetScissorRects(1, rect);
-    }
+    ctx.RSSetScissorRects(
+        1,
+        rect.as_ref().unwrap_or(&D3D11_RECT {
+            left: i32::MIN,
+            right: i32::MAX,
+            top: i32::MIN,
+            bottom: i32::MAX,
+        }),
+    );
 
     ctx.DrawInstanced(4, pipeline.vertex_buffer.len as u32, 0, 0);
     Ok(())
