@@ -3,7 +3,9 @@ use core::hash::BuildHasher;
 use glyph_brush::ab_glyph::Font;
 use glyph_brush::delegate_glyph_brush_builder_fns;
 use glyph_brush::DefaultSectionHasher;
-use winapi::um::d3d11::{ID3D11Device, D3D11_FILTER, D3D11_FILTER_MIN_MAG_MIP_LINEAR};
+use winapi::um::d3d11::{
+    ID3D11Device, D3D11_DEPTH_STENCIL_DESC, D3D11_FILTER, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+};
 use wio::com::ComPtr;
 
 use crate::util::HResult;
@@ -81,11 +83,37 @@ impl<F: Font, D, H: BuildHasher> GlyphBrushBuilder<D, F, H> {
             depth: self.depth,
         }
     }
+
+    pub fn depth_stencil_state(
+        self,
+        depth_stencil: D3D11_DEPTH_STENCIL_DESC,
+    ) -> GlyphBrushBuilder<D3D11_DEPTH_STENCIL_DESC, F, H> {
+        GlyphBrushBuilder {
+            inner: self.inner,
+            texture_filter_method: self.texture_filter_method,
+            depth: depth_stencil,
+        }
+    }
 }
 
 impl<F: Font, H: BuildHasher> GlyphBrushBuilder<(), F, H> {
     /// Builds a `GlyphBrush` using the given `ID3D11Device`.
     pub fn build(self, device: ComPtr<ID3D11Device>) -> HResult<GlyphBrush<(), F, H>> {
         GlyphBrush::<(), F, H>::new(device, self.texture_filter_method, self.inner)
+    }
+}
+
+impl<F: Font, H: BuildHasher> GlyphBrushBuilder<D3D11_DEPTH_STENCIL_DESC, F, H> {
+    /// Builds a `GlyphBrush` using the given `ID3D11Device`.
+    pub fn build(
+        self,
+        device: ComPtr<ID3D11Device>,
+    ) -> HResult<GlyphBrush<D3D11_DEPTH_STENCIL_DESC, F, H>> {
+        GlyphBrush::<D3D11_DEPTH_STENCIL_DESC, F, H>::new(
+            device,
+            self.texture_filter_method,
+            self.depth,
+            self.inner,
+        )
     }
 }

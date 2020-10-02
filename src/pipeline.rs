@@ -8,11 +8,12 @@ use winapi::shared::dxgiformat::{
 };
 use winapi::shared::minwindef::{FALSE, TRUE};
 use winapi::um::d3d11::{
-    ID3D11BlendState, ID3D11Buffer, ID3D11DepthStencilState, ID3D11Device, ID3D11DeviceContext,
-    ID3D11InputLayout, ID3D11PixelShader, ID3D11RasterizerState, ID3D11SamplerState,
-    ID3D11VertexShader, D3D11_BLEND_DESC, D3D11_BUFFER_DESC, D3D11_DEPTH_STENCILOP_DESC,
-    D3D11_DEPTH_STENCIL_DESC, D3D11_FILTER, D3D11_INPUT_ELEMENT_DESC, D3D11_RASTERIZER_DESC,
-    D3D11_RECT, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC, D3D11_SUBRESOURCE_DATA,
+    ID3D11BlendState, ID3D11Buffer, ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device,
+    ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader, ID3D11RasterizerState,
+    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11VertexShader, D3D11_BLEND_DESC,
+    D3D11_BUFFER_DESC, D3D11_DEPTH_STENCILOP_DESC, D3D11_DEPTH_STENCIL_DESC, D3D11_FILTER,
+    D3D11_INPUT_ELEMENT_DESC, D3D11_RASTERIZER_DESC, D3D11_RECT, D3D11_RENDER_TARGET_BLEND_DESC,
+    D3D11_SAMPLER_DESC, D3D11_SUBRESOURCE_DATA,
 };
 use winapi::um::d3d11::{
     D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_VERTEX_BUFFER, D3D11_BLEND_INV_SRC_ALPHA,
@@ -63,8 +64,45 @@ impl Pipeline<()> {
     }
 
     #[inline]
-    pub fn draw(&mut self, transform: [f32; 16], rect: Option<D3D11_RECT>) -> HResult<()> {
-        unsafe { draw(self, transform, rect) }
+    pub fn draw(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        transform: [f32; 16],
+        rect: Option<D3D11_RECT>,
+    ) -> HResult<()> {
+        unsafe { draw(self, target, None, transform, rect) }
+    }
+}
+
+impl Pipeline<D3D11_DEPTH_STENCIL_DESC> {
+    #[inline]
+    pub fn new(
+        device: ComPtr<ID3D11Device>,
+        filter_mode: D3D11_FILTER,
+        depth_stencil_desc: D3D11_DEPTH_STENCIL_DESC,
+        cache_width: u32,
+        cache_height: u32,
+    ) -> HResult<Self> {
+        unsafe {
+            build(
+                device,
+                filter_mode,
+                Some(depth_stencil_desc),
+                cache_width,
+                cache_height,
+            )
+        }
+    }
+
+    #[inline]
+    pub fn draw(
+        &mut self,
+        target: &ComPtr<ID3D11RenderTargetView>,
+        depth_stencil_view: &ComPtr<ID3D11DepthStencilView>,
+        transform: [f32; 16],
+        rect: Option<D3D11_RECT>,
+    ) -> HResult<()> {
+        unsafe { draw(self, target, Some(depth_stencil_view), transform, rect) }
     }
 }
 
@@ -143,7 +181,7 @@ const IDENTITY_MATRIX: [f32; 16] = [
 unsafe fn build<D>(
     device: ComPtr<ID3D11Device>,
     filter_mode: D3D11_FILTER,
-    depth_stencil_state: Option<()>,
+    depth_stencil_desc: Option<D3D11_DEPTH_STENCIL_DESC>,
     cache_width: u32,
     cache_height: u32,
 ) -> HResult<Pipeline<D>> {
@@ -185,22 +223,24 @@ unsafe fn build<D>(
     let rasterizer_state =
         com_ptr_from_fn(|rasterizer_state| device.CreateRasterizerState(&desc, rasterizer_state))?;
 
-    let stencil_op_desc = D3D11_DEPTH_STENCILOP_DESC {
-        StencilFailOp: D3D11_STENCIL_OP_KEEP,
-        StencilDepthFailOp: D3D11_STENCIL_OP_KEEP,
-        StencilPassOp: D3D11_STENCIL_OP_KEEP,
-        StencilFunc: D3D11_COMPARISON_ALWAYS,
-    };
-    let desc = D3D11_DEPTH_STENCIL_DESC {
-        DepthEnable: FALSE,
-        DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ALL,
-        DepthFunc: D3D11_COMPARISON_ALWAYS,
-        StencilEnable: FALSE,
-        StencilReadMask: 0,
-        StencilWriteMask: 0,
-        FrontFace: stencil_op_desc,
-        BackFace: stencil_op_desc,
-    };
+    let desc = depth_stencil_desc.unwrap_or({
+        let stencil_op_desc = D3D11_DEPTH_STENCILOP_DESC {
+            StencilFailOp: D3D11_STENCIL_OP_KEEP,
+            StencilDepthFailOp: D3D11_STENCIL_OP_KEEP,
+            StencilPassOp: D3D11_STENCIL_OP_KEEP,
+            StencilFunc: D3D11_COMPARISON_ALWAYS,
+        };
+        D3D11_DEPTH_STENCIL_DESC {
+            DepthEnable: FALSE,
+            DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ALL,
+            DepthFunc: D3D11_COMPARISON_ALWAYS,
+            StencilEnable: FALSE,
+            StencilReadMask: 0,
+            StencilWriteMask: 0,
+            FrontFace: stencil_op_desc,
+            BackFace: stencil_op_desc,
+        }
+    });
     let depth_stencil_state = com_ptr_from_fn(|depth_stencil_state| {
         device.CreateDepthStencilState(&desc, depth_stencil_state)
     })?;
@@ -338,6 +378,8 @@ unsafe fn build<D>(
 
 unsafe fn draw<D>(
     pipeline: &mut Pipeline<D>,
+    target: &ComPtr<ID3D11RenderTargetView>,
+    depth_stencil_view: Option<&ComPtr<ID3D11DepthStencilView>>,
     transform: [f32; 16],
     rect: Option<D3D11_RECT>,
 ) -> HResult<()> {
@@ -360,6 +402,13 @@ unsafe fn draw<D>(
 
         pipeline.transform = transform;
     }
+    ctx.OMSetRenderTargets(
+        1,
+        &target.as_raw(),
+        depth_stencil_view
+            .map(ComPtr::as_raw)
+            .unwrap_or_else(ptr::null_mut),
+    );
 
     let stride = mem::size_of::<Vertex>() as u32;
     ctx.IASetInputLayout(pipeline.input_layout.as_raw());
