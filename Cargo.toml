@@ -1,0 +1,24 @@
+[package]
+name = "d3d11-glyph"
+version = "0.1.0"
+authors = ["Lukas Wirth <lukastw97@gmail.com>"]
+edition = "2018"
+description = "A d3d11 renderer for [glyph-brush](https://crates.io/crates/glyph_brush)"
+license = "MIT"
+keywords = ["font", "ttf", "truetype", "d3d11", "dx11", "text"]
+repository = "https://github.com/veykril/d3d11-glyph"
+documentation = "https://docs.rs/d3d11-glyph"
+readme = "README.md"
+
+[dependencies]
+glyph_brush = "0.7"
+log = "0.4"
+winapi = { version = "0.3", features = ["d3d11",  "d3dcommon", "dxgi", "dxgiformat", "dxgitype", "minwindef", "winerror"] }
+wio = "0.2"
+
+[build-dependencies]
+winapi = { version = "0.3", features = ["d3dcompiler", "d3dcommon"] }
+
+[dev-dependencies]
+winit = "0.22"
+raw-window-handle = "0.3"
